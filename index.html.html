@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rolph Population Sandbox</title>
+  <style>
+    :root { --pink:#ec4899; --bg:#0b0f14; --fg:#e5e7eb; --muted:#94a3b8; --card:#111827; --grid:#1f2937; --accent:#334155; }
+    *{box-sizing:border-box}
+    body{margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg);} 
+    .wrap{max-width:1100px; margin:24px auto; padding:0 16px;} 
+    h1{font-size:22px; margin:0 0 12px; font-weight:600} 
+    .grid{display:grid; gap:12px} 
+    @media(min-width:900px){ .grid{grid-template-columns:repeat(3,1fr);} } 
+    .card{background:var(--card); border:1px solid var(--accent); border-radius:16px; box-shadow:0 1px 4px rgba(0,0,0,.25);} 
+    .card h2{margin:0; padding:14px 16px; font-size:16px; border-bottom:1px solid var(--accent);} 
+    .content{padding:14px 16px;} 
+    label{font-size:12px; color:var(--muted); display:block; margin-bottom:4px} 
+    input[type=number]{width:100%; padding:8px 10px; border-radius:10px; border:1px solid var(--accent); background:#0b1220; color:var(--fg);} 
+    .row{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:10px} 
+    .switch{display:flex; align-items:center; gap:8px; margin-top:8px} 
+    .muted{color:var(--muted); font-size:12px} 
+    .table{width:100%; border-collapse:collapse; font-size:12px} 
+    .table th,.table td{padding:6px 8px; border-bottom:1px solid var(--accent); text-align:left} 
+    /* Smaller chart: ~1/3 less tall than before */
+    .chart{height:min(44vh, 520px); width:100%; position:relative}
+    .chart canvas{display:block; width:100%; height:100%; background:transparent}
+    .tt{position:absolute; pointer-events:none; display:none; padding:6px 8px; font-size:12px; color:var(--fg); background:#0b1220; border:1px solid var(--accent); border-radius:8px; transform:translate(10px, -120%); white-space:nowrap}
+    .hint{font-size:11px; color:var(--muted); margin-top:6px} 
+    .chip{display:inline-block; padding:2px 8px; border-radius:999px; background:#0f172a; border:1px solid var(--accent); margin-left:6px} 
+    .btn{appearance:none; border:1px solid var(--accent); background:#0f172a; color:var(--fg); padding:8px 10px; border-radius:10px; cursor:pointer}
+    .btn:hover{filter:brightness(1.1)}
+    .flex{display:flex; align-items:center; gap:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Rolph Population Sandbox</h1>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Population & Timeline</h2>
+        <div class="content">
+          <div class="row">
+            <div><label>Start population</label><input id="startPop" type="number" value="400"></div>
+            <div><label>Start mean age</label><input id="startMeanAge" type="number" value="10"></div>
+            <div><label>Years to simulate</label><input id="years" type="number" value="100000"><div class="muted">Up to 100,000; sampled for speed.</div></div>
+            <div class="switch"><input id="logScale" type="checkbox"><label for="logScale">Log scale (min=1)</label></div>
+          </div>
+          <div class="flex">
+            <button id="simulateBtn" class="btn">Simulate</button>
+            <button id="csvBtn" class="btn">Download CSV</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Mortality</h2>
+        <div class="content">
+          <div class="row">
+            <div><label>Mean life (years)</label><input id="meanLife" type="number" step="0.1" value="10"></div>
+            <div><label>Max age</label><input id="maxAge" type="number" value="80"></div>
+            <div><label>Survive to 40 (1 in N)</label><input id="survive40Denom" type="number" value="180"><div class="muted">≈ <span id="s40Pct">0.556</span>%</div></div>
+            <div><label>Survive to max age (1 in N)</label><input id="surviveMaxDenom" type="number" value="1000"><div class="muted">≈ <span id="smaxPct">0.100</span>%</div></div>
+          </div>
+          <div class="muted">Checks: S(40)=<span id="checkS40">—</span>% · S(<span id="checkMaxAge">80</span>)=<span id="checkSMax">—</span>% · mean≈<span id="checkMean">—</span>y</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Fertility</h2>
+        <div class="content">
+          <div class="row">
+            <div><label>Birthing age start</label><input id="fertileStart" type="number" value="9"></div>
+            <div><label>Birthing age stop</label><input id="fertileEnd" type="number" value="35"></div>
+            <div style="grid-column:1 / span 2"><label>Average kids per girl</label><input id="kidsPerGirl" type="number" step="0.01" value="12.2">
+              <div class="muted">Window=<span id="fertYears">27</span>y · births per fertile girl≈<span id="birthsPerYear">0.452</span>/yr</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Population over time</h2>
+      <div class="content">
+        <div class="chart"><canvas id="chart"></canvas><div id="tooltip" class="tt"></div></div>
+        <div class="hint">Linear Y‑axis: −100,000 .. 100,000. Log scale available (min becomes 1, top 100,000). Hover line to inspect values.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>First 25 years (quick view)</h2>
+      <div class="content">
+        <table class="table" id="first25"></table>
+      </div>
+    </div>
+  </div>
+
+<script>
+// ---- numeric helpers ----
+function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
+function fmt(n){ return Number(n).toLocaleString(undefined,{maximumFractionDigits:0}); }
+
+// ---- truncated geometric + life table ----
+function truncatedGeomWeights(p, K){
+  const w = Array.from({length:K+1}, (_,k)=> p*Math.pow(1-p,k));
+  const s = w.reduce((a,b)=>a+b,0);
+  return w.map(x=>x/s);
+}
+function truncatedGeomMean(p,K){
+  const w = truncatedGeomWeights(p,K);
+  return w.reduce((acc,wi,k)=>acc+wi*k,0);
+}
+function solvePForTruncMean(target,K){
+  let lo=1e-9, hi=0.999999;
+  const maxMean=K/2; const t = clamp(target, 0, maxMean);
+  for(let i=0;i<120;i++){
+    const mid=(lo+hi)/2;
+    const m=truncatedGeomMean(mid,K);
+    if(Math.abs(m-t)<1e-9) return mid;
+    if(m>t) lo=mid; else hi=mid;
+  }
+  return (lo+hi)/2;
+}
+function buildLifeTable(meanLife,S40,Smax,maxAge){
+  const K=39;
+  const pmfMax=Smax;
+  const pmf40=Math.max(0,S40-Smax);
+  const massPre40=Math.max(0,1-(pmf40+pmfMax));
+  const targetMeanPre40=(meanLife-(pmf40*40+pmfMax*maxAge))/(massPre40||1);
+  const p=solvePForTruncMean(targetMeanPre40,K);
+  const pre40=truncatedGeomWeights(p,K).map(w=>w*massPre40);
+
+  const pmf=new Array(maxAge+1).fill(0);
+  for(let a=0;a<=K&&a<=maxAge;a++) pmf[a]=pre40[a]||0;
+  if(40<=maxAge) pmf[40]+=pmf40;
+  pmf[maxAge]+=pmfMax;
+  const sumP=pmf.reduce((a,b)=>a+b,0);
+  for(let a=0;a<pmf.length;a++) pmf[a]/=sumP;
+
+  const S=new Array(maxAge+2).fill(0); S[0]=1;
+  for(let a=0;a<=maxAge;a++) S[a+1]=S[a]-pmf[a];
+  const q=new Array(maxAge+1).fill(0);
+  for(let a=0;a<=maxAge;a++) q[a]=S[a]>0? pmf[a]/S[a] : 0; q[maxAge]=1;
+  const mean=pmf.reduce((acc,p,a)=>acc+p*a,0);
+  return {pmf,S,q,mean,S40check:S[40]||0,Smaxcheck:S[maxAge]||0};
+}
+
+// ---- core simulation ----
+function simulate(params){
+  const {startPop,startMeanAge,meanLife,survive40Denom,surviveMaxDenom,maxAge,fertileStart,fertileEnd,kidsPerGirl,years} = params;
+  const S40=1/survive40Denom, Smax=1/surviveMaxDenom;
+  const life=buildLifeTable(meanLife,S40,Smax,maxAge);
+  const q=life.q;
+
+  const span=Math.max(1,Math.min(maxAge,Math.round(2*startMeanAge)));
+  const ages=new Array(maxAge+1).fill(0);
+  for(let a=0;a<=span;a++) ages[a]=startPop/(span+1);
+
+  const fertYears=Math.max(1,fertileEnd-fertileStart+1);
+  const fertRate=kidsPerGirl/fertYears;
+
+  const sampleEvery=Math.max(1,Math.floor(years/1200));
+  const data=[], first25=[];
+  let ageCounts=ages.slice();
+  for(let t=0;t<=years;t++){
+    const total=ageCounts.reduce((a,b)=>a+b,0);
+    const fertileFemales=0.5*ageCounts.slice(fertileStart, fertileEnd+1).reduce((a,b)=>a+b,0);
+    const births=fertRate*fertileFemales;
+    const deaths=ageCounts.reduce((acc,c,a)=>acc+c*q[a],0);
+    if(t<=25) first25.push({Year:t,Population:total,Births:births,Deaths:deaths});
+    if(t%sampleEvery===0) data.push({t, pop: total, births, deaths});
+    if(t===years) break;
+    const survivors=ageCounts.map((c,a)=>c*(1-q[a]));
+    const next=new Array(maxAge+1).fill(0);
+    for(let a=0;a<maxAge;a++) next[a+1]=survivors[a];
+    next[0]+=births; ageCounts=next;
+  }
+  return {data,first25,life};
+}
+
+// ---- canvas chart ----
+function drawChart(canvas, data, years, log, cross){
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.getBoundingClientRect();
+  canvas.width=rect.width*dpr; canvas.height=rect.height*dpr;
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  const m={l:64,r:16,t:12,b:28};
+  const W=rect.width, H=rect.height, w=W-m.l-m.r, h=H-m.t-m.b;
+
+  // clear
+  ctx.clearRect(0,0,W,H);
+
+  // domains
+  const x0=0, x1=years;
+  const yMinLinear=-100000, yMaxLinear=100000; // your request
+  const yMaxLog=100000;
+  const xToPx = (x)=> m.l + ((x-x0)/(x1-x0))*w;
+  const yToPxLinear=(y)=> m.t + (1 - (y - yMinLinear)/(yMaxLinear - yMinLinear)) * h;
+  const yToPxLog=(y)=>{
+    const yy=Math.max(1,y);
+    const t=(Math.log10(yy)-0)/(Math.log10(yMaxLog)-0);
+    return m.t + (1 - t)*h;
+  };
+  const yToPx = log ? yToPxLog : yToPxLinear;
+
+  // grid
+  ctx.strokeStyle='#1f2937'; ctx.lineWidth=1;
+  for(let i=0;i<=10;i++){ const x=x0 + (i/10)*(x1-x0); const px=xToPx(x); ctx.beginPath(); ctx.moveTo(px,m.t); ctx.lineTo(px,m.t+h); ctx.stroke(); }
+  if(!log){
+    const yTicks=[-100000,-50000,0,50000,100000];
+    yTicks.forEach(y=>{ const py=yToPx(y); ctx.beginPath(); ctx.moveTo(m.l,py); ctx.lineTo(m.l+w,py); ctx.stroke(); });
+  }else{
+    const pows=[0,1,2,3,4,5];
+    pows.forEach(p=>{ const y=10**p; const py=yToPx(y); ctx.beginPath(); ctx.moveTo(m.l,py); ctx.lineTo(m.l+w,py); ctx.stroke(); });
+  }
+
+  // labels
+  ctx.fillStyle='#94a3b8'; ctx.font='12px system-ui,Segoe UI,Roboto,Helvetica,Arial';
+  ctx.textAlign='center';
+  for(let i=0;i<=10;i++){ const x=x0+(i/10)*(x1-x0); const px=xToPx(x); ctx.fillText(String(Math.round(x)), px, H-8); }
+  ctx.textAlign='right';
+  const yLabels = log ? [1,10,100,1000,10000,100000] : [-100000,0,100000];
+  yLabels.forEach(y=>{ const py=yToPx(y); const label = (y===0?'0': (Math.abs(y)>=1000? (y<0?'-':'')+ (Math.abs(y)>=100000? (Math.abs(y)/1000).toFixed(0)+'k' : (Math.abs(y)/1000).toFixed(0)+'k') : String(y))); ctx.fillText(label, m.l-6, py+4); });
+
+  // reference top line at 100k
+  ctx.strokeStyle='#64748b'; ctx.setLineDash([4,4]);
+  const pyTop = yToPx(log? yMaxLog : yMaxLinear);
+  ctx.beginPath(); ctx.moveTo(m.l,pyTop); ctx.lineTo(m.l+w,pyTop); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // pink line
+  ctx.strokeStyle='#ec4899'; ctx.lineWidth=2.5; ctx.beginPath();
+  for(let i=0;i<data.length;i++){
+    const pt=data[i];
+    const x=xToPx(pt.t), y=yToPx(pt.pop);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // crosshair
+  if(cross){
+    const {t, pop} = cross;
+    const cx = xToPx(t), cy = yToPx(pop);
+    ctx.strokeStyle='#94a3b8'; ctx.lineWidth=1; ctx.setLineDash([2,2]);
+    ctx.beginPath(); ctx.moveTo(cx, m.t); ctx.lineTo(cx, m.t+h); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#ec4899'; ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
+  }
+
+  return {xToPx, yToPx, x0, x1};
+}
+
+// ---- UI wiring ----
+const els = {
+  startPop: document.getElementById('startPop'),
+  startMeanAge: document.getElementById('startMeanAge'),
+  years: document.getElementById('years'),
+  logScale: document.getElementById('logScale'),
+  meanLife: document.getElementById('meanLife'),
+  maxAge: document.getElementById('maxAge'),
+  survive40Denom: document.getElementById('survive40Denom'),
+  surviveMaxDenom: document.getElementById('surviveMaxDenom'),
+  fertileStart: document.getElementById('fertileStart'),
+  fertileEnd: document.getElementById('fertileEnd'),
+  kidsPerGirl: document.getElementById('kidsPerGirl'),
+  chart: document.getElementById('chart'),
+  first25: document.getElementById('first25'),
+  s40Pct: document.getElementById('s40Pct'),
+  smaxPct: document.getElementById('smaxPct'),
+  checkS40: document.getElementById('checkS40'),
+  checkSMax: document.getElementById('checkSMax'),
+  checkMaxAge: document.getElementById('checkMaxAge'),
+  checkMean: document.getElementById('checkMean'),
+  fertYears: document.getElementById('fertYears'),
+  birthsPerYear: document.getElementById('birthsPerYear'),
+  simulateBtn: document.getElementById('simulateBtn'),
+  csvBtn: document.getElementById('csvBtn'),
+  tooltip: document.getElementById('tooltip'),
+};
+
+let cached = {data:[], years:0, log:false, scales:null};
+
+function paramsFromUI(){
+  const fp = parseFloat(els.fertileStart.value)||0;
+  const fe = parseFloat(els.fertileEnd.value)||0;
+  const fertYears = Math.max(1, fe - fp + 1);
+  els.fertYears.textContent = String(fertYears);
+  const kpg = parseFloat(els.kidsPerGirl.value)||0;
+  els.birthsPerYear.textContent = (kpg/fertYears).toFixed(3);
+
+  const s40d = parseFloat(els.survive40Denom.value)||1;
+  const smaxd = parseFloat(els.surviveMaxDenom.value)||1;
+  els.s40Pct.textContent = (100/s40d).toFixed(3);
+  els.smaxPct.textContent = (100/smaxd).toFixed(3);
+  els.checkMaxAge.textContent = els.maxAge.value;
+
+  return {
+    startPop: parseFloat(els.startPop.value)||0,
+    startMeanAge: parseFloat(els.startMeanAge.value)||0,
+    meanLife: parseFloat(els.meanLife.value)||0,
+    survive40Denom: s40d,
+    surviveMaxDenom: smaxd,
+    maxAge: parseInt(els.maxAge.value)||0,
+    fertileStart: parseInt(els.fertileStart.value)||0,
+    fertileEnd: parseInt(els.fertileEnd.value)||0,
+    kidsPerGirl: kpg,
+    years: parseInt(els.years.value)||0,
+    logScale: els.logScale.checked
+  };
+}
+
+function renderFirst25(rows){
+  const table = els.first25;
+  let html = '<thead><tr><th>Year</th><th>Population</th><th>Births</th><th>Deaths</th></tr></thead><tbody>';
+  for(const r of rows){
+    html += `<tr><td>${r.Year}</td><td>${fmt(r.Population)}</td><td>${fmt(r.Births)}</td><td>${fmt(r.Deaths)}</td></tr>`;
+  }
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+function downloadCSV(data){
+  let csv = 't,pop,births,deaths\n';
+  for(const d of data){ csv += `${d.t},${Math.round(d.pop)},${Math.round(d.births)},${Math.round(d.deaths)}\n`; }
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'population_timeseries.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function run(){
+  const p = paramsFromUI();
+  const {data, first25, life} = simulate(p);
+  const scales = drawChart(els.chart, data, p.years, p.logScale);
+  renderFirst25(first25);
+  els.checkS40.textContent = (life.S40check*100).toFixed(3);
+  els.checkSMax.textContent = (life.Smaxcheck*100).toFixed(3);
+  els.checkMean.textContent = life.mean.toFixed(3);
+  cached = {data, years:p.years, log:p.logScale, scales};
+  return {data};
+}
+
+// hover tooltip
+function setupHover(){
+  const canvas = els.chart; const tip = els.tooltip;
+  function nearestPoint(t){
+    if(!cached.data.length) return null;
+    let lo=0, hi=cached.data.length-1;
+    // data is sorted by t; binary search for nearest
+    while(hi-lo>1){ const mid=(lo+hi)>>1; if(cached.data[mid].t < t) lo=mid; else hi=mid; }
+    const a=cached.data[lo], b=cached.data[Math.min(hi,cached.data.length-1)];
+    return Math.abs(a.t-t) < Math.abs(b.t-t) ? a : b;
+  }
+  function move(ev){
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const m = {l:64,r:16,t:12,b:28};
+    const w = rect.width - m.l - m.r; if(w<=0) return;
+    const t = clamp(0 + ((x - m.l)/w) * (cached.years - 0), 0, cached.years);
+    const pt = nearestPoint(t); if(!pt){ tip.style.display='none'; return; }
+    // redraw with crosshair
+    drawChart(canvas, cached.data, cached.years, cached.log, {t:pt.t, pop:pt.pop});
+    // position tooltip
+    tip.style.display='block';
+    tip.textContent = `Year ${Math.round(pt.t)} — Pop ${Math.round(pt.pop).toLocaleString()}`;
+    let tx = x + 10; let ty = ev.clientY - rect.top - 10;
+    if(tx > rect.width - 120) tx = rect.width - 120; // keep inside
+    if(ty < 20) ty = 20;
+    tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+  }
+  function leave(){ tip.style.display='none'; drawChart(canvas, cached.data, cached.years, cached.log, null); }
+  canvas.addEventListener('mousemove', move);
+  canvas.addEventListener('mouseleave', leave);
+}
+
+// wire inputs (debounced)
+let to=null;
+function onChange(){ clearTimeout(to); to=setTimeout(run, 50); }
+Object.values(els).forEach(el=>{ if(el && (el.tagName==='INPUT' || el.id==='logScale')) el.addEventListener('input', onChange); });
+els.simulateBtn.addEventListener('click', run);
+els.csvBtn.addEventListener('click', ()=>{ const {data}=run(); downloadCSV(data); });
+window.addEventListener('resize', ()=>{ run(); });
+
+// initial
+setupHover();
+run();
+</script>
+</body>
+</html>
