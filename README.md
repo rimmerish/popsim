@@ -1,3 +1,5 @@
+USE index2.html for latest version. simply download file and open with chrome.
+
 # Rolph Population Sandbox
 
 A tiny, client‑side population dynamics simulator you can share as a single HTML file or embed as a React component. It models age‑structured population change year‑by‑year with adjustable fertility, mortality, and periodic catastrophes, and plots the result with a hoverable tooltip.
